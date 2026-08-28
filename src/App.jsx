@@ -88,6 +88,12 @@ function formatNumber(value, suffix = "") {
   return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 }).format(number)}${suffix}`;
 }
 
+function formatRoundedUpNumber(value, suffix = "") {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return `0${suffix}`;
+  return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 }).format(Math.ceil(number))}${suffix}`;
+}
+
 function displayValue(key, value) {
   if (key === "cutting_time_seconds") return formatDuration(value);
   if (key.includes("time") || key.endsWith("_at")) return formatDateTime(value);
@@ -136,7 +142,7 @@ function DashboardPlaceholder({ total, metrics, filters }) {
     { label: "Records In View", value: total.toLocaleString("en-GB"), icon: Database },
     { label: "Date Range", value: rangeLabel, icon: CalendarDays },
     { label: "Total Cutting Time", value: formatHoursMinutes(metrics.totalCuttingTimeSeconds), icon: Gauge },
-    { label: "Total Cut Path", value: `${formatNumber(totalCutPathLength, "")} m`, icon: Layers3 },
+    { label: "Total Cut Path", value: formatRoundedUpNumber(totalCutPathLength, " m"), icon: Layers3 },
   ];
 
   return (
