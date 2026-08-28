@@ -104,12 +104,26 @@ app.get("/api/jobs", async (req, res) => {
       { ...params, limit, offset },
     );
 
-    const [[countRow]] = await pool.execute(
-      `SELECT COUNT(*) AS total FROM optiscout_jobs ${clause}`,
+    const [[summaryRow]] = await pool.execute(
+      `SELECT
+         COUNT(*) AS total,
+         COALESCE(SUM(cutting_time_seconds), 0) AS total_cutting_time_seconds,
+         COALESCE(SUM(cut_path_length), 0) AS total_cut_path_length
+       FROM optiscout_jobs
+       ${clause}`,
       params,
     );
 
-    res.json({ rows, total: countRow.total, limit, offset });
+    res.json({
+      rows,
+      total: summaryRow.total,
+      metrics: {
+        totalCuttingTimeSeconds: Number(summaryRow.total_cutting_time_seconds),
+        totalCutPathLength: Number(summaryRow.total_cut_path_length),
+      },
+      limit,
+      offset,
+    });
   } catch (error) {
     res.status(500).json({ message: "Unable to load job records.", detail: error.message });
   }

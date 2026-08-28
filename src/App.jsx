@@ -73,6 +73,14 @@ function formatDuration(seconds) {
   return `${secs}s`;
 }
 
+function formatHoursMinutes(seconds) {
+  const total = Number(seconds || 0);
+  if (!Number.isFinite(total)) return "0h 0m";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return `${hours.toLocaleString("en-GB")}h ${minutes}m`;
+}
+
 function formatNumber(value, suffix = "") {
   if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
@@ -117,17 +125,18 @@ function Spinner() {
   );
 }
 
-function DashboardPlaceholder({ total, filters }) {
+function DashboardPlaceholder({ total, metrics, filters }) {
   const rangeLabel =
     filters.startDate || filters.endDate
       ? `${filters.startDate || "Start"} to ${filters.endDate || "Today"}`
       : "All available dates";
+  const totalCutPathLength = Number(metrics.totalCutPathLength || 0);
 
   const tiles = [
     { label: "Records In View", value: total.toLocaleString("en-GB"), icon: Database },
     { label: "Date Range", value: rangeLabel, icon: CalendarDays },
-    { label: "Machine Output", value: "Next", icon: Gauge },
-    { label: "Material Trends", value: "Next", icon: Layers3 },
+    { label: "Total Cutting Time", value: formatHoursMinutes(metrics.totalCuttingTimeSeconds), icon: Gauge },
+    { label: "Total Cut Path", value: `${formatNumber(totalCutPathLength, "")} m`, icon: Layers3 },
   ];
 
   return (
@@ -326,6 +335,7 @@ export default function App() {
   const debouncedSearch = useDebouncedValue(filters.search);
   const [jobs, setJobs] = useState([]);
   const [total, setTotal] = useState(0);
+  const [metrics, setMetrics] = useState({ totalCuttingTimeSeconds: 0, totalCutPathLength: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -345,12 +355,14 @@ export default function App() {
         if (cancelled) return;
         setJobs(payload.rows);
         setTotal(payload.total);
+        setMetrics(payload.metrics || { totalCuttingTimeSeconds: 0, totalCutPathLength: 0 });
       })
       .catch((fetchError) => {
         if (cancelled) return;
         setError(fetchError.message);
         setJobs([]);
         setTotal(0);
+        setMetrics({ totalCuttingTimeSeconds: 0, totalCutPathLength: 0 });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -376,7 +388,7 @@ export default function App() {
         </div>
       </header>
 
-      <DashboardPlaceholder total={total} filters={filters} />
+      <DashboardPlaceholder total={total} metrics={metrics} filters={filters} />
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase text-slate-500">
