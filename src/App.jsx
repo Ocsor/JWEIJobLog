@@ -177,7 +177,7 @@ function Spinner() {
   );
 }
 
-function MetricTile({ label, value, icon: Icon, hint, onClick }) {
+function MetricTile({ label, value, icon: Icon, hint, hints, onClick }) {
   const Component = onClick ? "button" : "div";
 
   return (
@@ -194,7 +194,75 @@ function MetricTile({ label, value, icon: Icon, hint, onClick }) {
       </div>
       <div className="mt-3 truncate text-2xl font-semibold text-ink">{value}</div>
       {hint && <div className="mt-1 truncate text-xs text-slate-500">{hint}</div>}
+      {hints?.length > 0 && (
+        <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+          {hints.map((item) => (
+            <div key={item}>{item}</div>
+          ))}
+        </div>
+      )}
     </Component>
+  );
+}
+
+function DonutGauge({ label, value, detail, colorClass, strokeColor }) {
+  const safeValue = Math.min(Math.max(Number(value || 0), 0), 100);
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (safeValue / 100) * circumference;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center shadow-sm">
+      <div className="mx-auto h-28 w-28">
+        <svg viewBox="0 0 112 112" className="h-full w-full -rotate-90" aria-hidden="true">
+          <circle
+            cx="56"
+            cy="56"
+            r={radius}
+            fill="none"
+            stroke="#e5e7eb"
+            strokeWidth="12"
+          />
+          <circle
+            cx="56"
+            cy="56"
+            r={radius}
+            fill="none"
+            stroke={strokeColor}
+            strokeLinecap="round"
+            strokeWidth="12"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+          />
+        </svg>
+        <div className="-mt-28 flex h-28 items-center justify-center">
+          <span className="text-xl font-semibold text-ink">{formatPercent(value)}</span>
+        </div>
+      </div>
+      <div className={`mt-3 text-sm font-semibold ${colorClass}`}>{label}</div>
+      <div className="mt-1 text-xs text-slate-500">{detail}</div>
+    </div>
+  );
+}
+
+function UtilisationGauges({ shiftPercent, windowPercent, shiftCapacitySeconds, productionWindowSeconds }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <DonutGauge
+        label="Shift Capacity"
+        value={shiftPercent}
+        detail={`${formatHoursMinutes(shiftCapacitySeconds)} planned capacity`}
+        colorClass="text-cyan-800"
+        strokeColor="#0e7490"
+      />
+      <DonutGauge
+        label="First-To-Last Cut"
+        value={windowPercent}
+        detail={`${formatHoursMinutes(productionWindowSeconds)} production window`}
+        colorClass="text-emerald-700"
+        strokeColor="#059669"
+      />
+    </div>
   );
 }
 
@@ -406,6 +474,10 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
   const cuttingCapacityPercent = shiftCapacitySeconds
     ? (Number(metrics.totalCuttingTimeSeconds || 0) / shiftCapacitySeconds) * 100
     : 0;
+  const productionWindowSeconds = Number(metrics.totalProductionWindowSeconds || 0);
+  const cuttingWindowPercent = productionWindowSeconds
+    ? (Number(metrics.totalCuttingTimeSeconds || 0) / productionWindowSeconds) * 100
+    : 0;
 
   const tiles = [
     { label: "Records In View", value: total.toLocaleString("en-GB"), icon: Database, hint: rangeLabel },
@@ -413,7 +485,6 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
       label: "Total Cutting Time",
       value: formatHoursMinutes(metrics.totalCuttingTimeSeconds),
       icon: Gauge,
-      hint: shiftCapacitySeconds ? `${formatPercent(cuttingCapacityPercent)} of shift capacity` : undefined,
     },
     { label: "Total Idle Time", value: formatHoursMinutes(idle.totalIdleSeconds), icon: Clock3, hint: `${formatPercent(idlePercent)} of tracked time` },
     { label: "Total Cut Path", value: formatRoundedUpNumber(totalCutPathLength, " m"), icon: Layers3 },
@@ -464,6 +535,13 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
           </div>
 
           <div className="space-y-4">
+            <UtilisationGauges
+              shiftPercent={cuttingCapacityPercent}
+              windowPercent={cuttingWindowPercent}
+              shiftCapacitySeconds={shiftCapacitySeconds}
+              productionWindowSeconds={productionWindowSeconds}
+            />
+
             <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-base font-semibold text-ink">Idle Gap Bands</h2>
@@ -472,7 +550,7 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
               <BucketBreakdown buckets={idle.buckets} totalIdleSeconds={Number(idle.totalIdleSeconds || 0)} />
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <div className="grid gap-3 sm:grid-cols-2">
               <MetricTile label="Average Idle Gap" value={formatHoursMinutes(idle.averageIdleSeconds)} icon={CalendarDays} />
               <MetricTile
                 label="Longest Idle Gap"
@@ -867,6 +945,7 @@ export default function App() {
   const [metrics, setMetrics] = useState({
     totalCuttingTimeSeconds: 0,
     totalCutPathLength: 0,
+    totalProductionWindowSeconds: 0,
     activeDays: 0,
     activeMachines: 0,
   });
@@ -916,6 +995,7 @@ export default function App() {
         setMetrics(payload.metrics || {
           totalCuttingTimeSeconds: 0,
           totalCutPathLength: 0,
+          totalProductionWindowSeconds: 0,
           activeDays: 0,
           activeMachines: 0,
         });
@@ -928,6 +1008,7 @@ export default function App() {
         setMetrics({
           totalCuttingTimeSeconds: 0,
           totalCutPathLength: 0,
+          totalProductionWindowSeconds: 0,
           activeDays: 0,
           activeMachines: 0,
         });

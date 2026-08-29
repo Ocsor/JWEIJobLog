@@ -318,6 +318,22 @@ app.get("/api/jobs", async (req, res) => {
       params,
     );
 
+    const [[productionWindowRow]] = await pool.execute(
+      `SELECT COALESCE(SUM(TIMESTAMPDIFF(SECOND, first_start_time, last_end_time)), 0) AS total_production_window_seconds
+       FROM (
+         SELECT
+           COALESCE(NULLIF(machine_name, ''), source_pc, 'Unassigned') AS machine_name,
+           DATE(start_time) AS production_date,
+           MIN(start_time) AS first_start_time,
+           MAX(end_time) AS last_end_time
+         FROM optiscout_jobs
+         ${idleBaseClause}
+         GROUP BY COALESCE(NULLIF(machine_name, ''), source_pc, 'Unassigned'), DATE(start_time)
+       ) production_windows
+       WHERE last_end_time > first_start_time`,
+      params,
+    );
+
     const [idleGapRows] = await pool.execute(
       `WITH filtered_jobs AS (
          SELECT
@@ -373,6 +389,7 @@ app.get("/api/jobs", async (req, res) => {
       metrics: {
         totalCuttingTimeSeconds: Number(summaryRow.total_cutting_time_seconds),
         totalCutPathLength: Number(summaryRow.total_cut_path_length),
+        totalProductionWindowSeconds: Number(productionWindowRow.total_production_window_seconds),
         activeDays: Number(summaryRow.active_days),
         activeMachines: Number(summaryRow.active_machines),
         active: activeSeries,
