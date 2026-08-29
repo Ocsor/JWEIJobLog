@@ -198,23 +198,70 @@ function MetricTile({ label, value, icon: Icon, hint, onClick }) {
   );
 }
 
-function IdleBarChart({ daily, hourly, showHourly, yAxisMaxSeconds }) {
+function ChartModeToggle({ value, onChange }) {
+  const options = [
+    { value: "idle", label: "Idle" },
+    { value: "active", label: "Active" },
+    { value: "stacked", label: "Both" },
+  ];
+
+  return (
+    <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+            value === option.value
+              ? "bg-white text-cyan-800 shadow-sm"
+              : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
+          }`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function IdleBarChart({ daily, hourly, activeDaily, activeHourly, showHourly, yAxisMaxSeconds, mode }) {
   const chartData = showHourly
     ? Array.from({ length: 24 }, (_, hour) => {
-        const item = hourly.find((entry) => Number(entry.idle_hour) === hour);
+        const idleItem = hourly.find((entry) => Number(entry.idle_hour) === hour);
+        const activeItem = activeHourly.find((entry) => Number(entry.active_hour) === hour);
         return {
           label: String(hour).padStart(2, "0"),
           tooltipLabel: `${String(hour).padStart(2, "0")}:00`,
-          total_idle_seconds: Number(item?.total_idle_seconds || 0),
+          idleSeconds: Number(idleItem?.total_idle_seconds || 0),
+          activeSeconds: Number(activeItem?.total_active_seconds || 0),
         };
       })
-    : daily.slice(-14).map((item) => ({
-        label: formatShortDate(item.idle_date),
-        tooltipLabel: formatShortDate(item.idle_date),
-        total_idle_seconds: Number(item.total_idle_seconds || 0),
-      }));
-  const hasData = chartData.some((item) => Number(item.total_idle_seconds || 0) > 0);
-  const maxSeconds = Math.max(Number(yAxisMaxSeconds || 0), ...chartData.map((item) => Number(item.total_idle_seconds || 0)), 1);
+    : Array.from(
+        new Set([
+          ...daily.slice(-14).map((item) => item.idle_date),
+          ...activeDaily.slice(-14).map((item) => item.active_date),
+        ]),
+      )
+        .sort()
+        .slice(-14)
+        .map((dateKey) => {
+          const idleItem = daily.find((entry) => entry.idle_date === dateKey);
+          const activeItem = activeDaily.find((entry) => entry.active_date === dateKey);
+          return {
+            label: formatShortDate(dateKey),
+            tooltipLabel: formatShortDate(dateKey),
+            idleSeconds: Number(idleItem?.total_idle_seconds || 0),
+            activeSeconds: Number(activeItem?.total_active_seconds || 0),
+          };
+        });
+  const valueForMode = (item) => {
+    if (mode === "active") return item.activeSeconds;
+    if (mode === "stacked") return item.activeSeconds + item.idleSeconds;
+    return item.idleSeconds;
+  };
+  const hasData = chartData.some((item) => valueForMode(item) > 0);
+  const maxSeconds = Math.max(Number(yAxisMaxSeconds || 0), ...chartData.map(valueForMode), 1);
   const tickValues = [maxSeconds, maxSeconds * 0.75, maxSeconds * 0.5, maxSeconds * 0.25, 0];
 
   if (!chartData.length || !hasData) {
@@ -249,17 +296,34 @@ function IdleBarChart({ daily, hourly, showHourly, yAxisMaxSeconds }) {
           </div>
           <div className="relative flex h-64 items-start gap-2">
             {chartData.map((item, index) => {
-              const seconds = Number(item.total_idle_seconds || 0);
-              const height = seconds > 0 ? Math.max((seconds / maxSeconds) * 100, 4) : 0;
+              const idleSeconds = Number(item.idleSeconds || 0);
+              const activeSeconds = Number(item.activeSeconds || 0);
+              const displaySeconds = valueForMode(item);
+              const idleHeight = mode !== "active" && idleSeconds > 0 ? (idleSeconds / maxSeconds) * 100 : 0;
+              const activeHeight = mode !== "idle" && activeSeconds > 0 ? (activeSeconds / maxSeconds) * 100 : 0;
+              const singleHeight = displaySeconds > 0 ? Math.max((displaySeconds / maxSeconds) * 100, 4) : 0;
               const showLabel = !showHourly || index % 3 === 0;
               return (
                 <div key={item.label} className="flex h-full min-w-0 flex-1 flex-col items-center gap-2">
                   <div className="flex h-56 w-full items-end border-b border-slate-300">
-                    <div
-                      className="w-full rounded-t-md bg-cyan-700 transition-all hover:bg-cyan-600"
-                      style={{ height: `${height}%` }}
-                      title={`${item.tooltipLabel}: ${formatHoursMinutes(seconds)}`}
-                    />
+                    {mode === "stacked" ? (
+                      <div
+                        className="flex w-full flex-col-reverse overflow-hidden rounded-t-md"
+                        style={{ height: `${Math.max(activeHeight + idleHeight, displaySeconds > 0 ? 4 : 0)}%` }}
+                        title={`${item.tooltipLabel}: active ${formatHoursMinutes(activeSeconds)}, idle ${formatHoursMinutes(idleSeconds)}`}
+                      >
+                        <div className="bg-cyan-700" style={{ height: `${displaySeconds ? (idleSeconds / displaySeconds) * 100 : 0}%` }} />
+                        <div className="bg-emerald-600" style={{ height: `${displaySeconds ? (activeSeconds / displaySeconds) * 100 : 0}%` }} />
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-full rounded-t-md transition-all ${
+                          mode === "active" ? "bg-emerald-600 hover:bg-emerald-500" : "bg-cyan-700 hover:bg-cyan-600"
+                        }`}
+                        style={{ height: `${singleHeight}%` }}
+                        title={`${item.tooltipLabel}: ${formatHoursMinutes(displaySeconds)}`}
+                      />
+                    )}
                   </div>
                   <div className="h-6 w-full text-center text-[11px] leading-4 text-slate-500">
                     {showLabel ? item.label : ""}
@@ -309,6 +373,7 @@ function BucketBreakdown({ buckets, totalIdleSeconds }) {
 }
 
 function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongestGaps }) {
+  const [chartMode, setChartMode] = useState("idle");
   const rangeLabel =
     filters.startDate || filters.endDate
       ? `${filters.startDate || "Start"} to ${filters.endDate || "Today"}`
@@ -325,6 +390,7 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
     byMachine: [],
     longestGaps: [],
   };
+  const active = metrics.active || { daily: [], hourly: [] };
   const totalTime = Number(metrics.totalCuttingTimeSeconds || 0) + Number(idle.totalIdleSeconds || 0);
   const idlePercent = totalTime ? (Number(idle.totalIdleSeconds || 0) / totalTime) * 100 : 0;
   const showHourlyChart = Boolean(filters.startDate && filters.endDate && filters.startDate === filters.endDate);
@@ -365,20 +431,36 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-ink">
-                  {showHourlyChart ? "Idle Time By Hour" : "Idle Time By Day"}
+                  {showHourlyChart ? "Machine Time By Hour" : "Machine Time By Day"}
                 </h2>
-                <p className="text-sm text-slate-500">Idle gaps clipped to the configured shift window.</p>
+                <p className="text-sm text-slate-500">Active and idle time clipped to the configured shift window.</p>
               </div>
-              <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                {showHourlyChart ? "24 hours shown" : `Last ${Math.min(idle.daily.length, 14)} days shown`}
-              </span>
+              <div className="flex flex-col items-end gap-2">
+                <ChartModeToggle value={chartMode} onChange={setChartMode} />
+                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                  {showHourlyChart ? "24 hours shown" : `Last ${Math.min(idle.daily.length, 14)} days shown`}
+                </span>
+              </div>
             </div>
             <IdleBarChart
               daily={idle.daily}
               hourly={idle.hourly || []}
+              activeDaily={active.daily || []}
+              activeHourly={active.hourly || []}
               showHourly={showHourlyChart}
               yAxisMaxSeconds={chartAxisMaxSeconds}
+              mode={chartMode}
             />
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm bg-cyan-700" />
+                Idle
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-sm bg-emerald-600" />
+                Active
+              </span>
+            </div>
           </div>
 
           <div className="space-y-4">

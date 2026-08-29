@@ -227,6 +227,42 @@ function calculateIdleMetrics(gaps, settings) {
   };
 }
 
+function calculateActiveSeries(records, settings) {
+  const dailyMap = new Map();
+  const hourlyMap = new Map();
+
+  records.forEach((record) => {
+    const activeSeconds = Number(record.cutting_time_seconds || 0);
+    const startTime = new Date(record.start_time);
+
+    if (!Number.isFinite(activeSeconds) || activeSeconds <= 0 || Number.isNaN(startTime.getTime())) return;
+
+    addGapOverlapToBuckets({
+      gapStart: startTime,
+      gapEnd: new Date(startTime.getTime() + activeSeconds * 1000),
+      idleSeconds: activeSeconds,
+      settings,
+      daily: dailyMap,
+      hourly: hourlyMap,
+    });
+  });
+
+  return {
+    daily: Array.from(dailyMap.entries())
+      .map(([active_date, total_active_seconds]) => ({
+        active_date,
+        total_active_seconds: Math.round(total_active_seconds),
+      }))
+      .sort((a, b) => a.active_date.localeCompare(b.active_date)),
+    hourly: Array.from(hourlyMap.entries())
+      .map(([active_hour, total_active_seconds]) => ({
+        active_hour,
+        total_active_seconds: Math.round(total_active_seconds),
+      }))
+      .sort((a, b) => a.active_hour - b.active_hour),
+  };
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -313,7 +349,18 @@ app.get("/api/jobs", async (req, res) => {
       params,
     );
 
+    const [activeRows] = await pool.execute(
+      `SELECT start_time, cutting_time_seconds
+       FROM optiscout_jobs
+       ${idleBaseClause}
+         AND cutting_time_seconds IS NOT NULL
+         AND cutting_time_seconds > 0
+       ORDER BY start_time ASC`,
+      params,
+    );
+
     const idleMetrics = calculateIdleMetrics(idleGapRows, idleSettings);
+    const activeSeries = calculateActiveSeries(activeRows, idleSettings);
 
     res.json({
       rows,
@@ -323,6 +370,7 @@ app.get("/api/jobs", async (req, res) => {
         totalCutPathLength: Number(summaryRow.total_cut_path_length),
         activeDays: Number(summaryRow.active_days),
         activeMachines: Number(summaryRow.active_machines),
+        active: activeSeries,
         idle: {
           ...idleMetrics,
           settings: {
