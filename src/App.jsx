@@ -54,6 +54,7 @@ const detailLabels = {
 };
 
 const defaultSettings = {
+  shiftStartTime: "08:00",
   shiftLengthHours: "8",
   setupAllowanceMinutes: "0",
   shortIdleThresholdMinutes: "10",
@@ -129,6 +130,16 @@ function formatPercent(value) {
   return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(number)}%`;
 }
 
+function formatAxisDuration(seconds) {
+  const total = Number(seconds || 0);
+  if (!Number.isFinite(total) || total <= 0) return "0";
+  const hours = total / 3600;
+  if (hours >= 1) {
+    return `${new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(hours)}h`;
+  }
+  return `${Math.round(total / 60)}m`;
+}
+
 function displayValue(key, value) {
   if (key === "cutting_time_seconds") return formatDuration(value);
   if (key.includes("time") || key.endsWith("_at")) return formatDateTime(value);
@@ -166,24 +177,47 @@ function Spinner() {
   );
 }
 
-function MetricTile({ label, value, icon: Icon, hint }) {
+function MetricTile({ label, value, icon: Icon, hint, onClick }) {
+  const Component = onClick ? "button" : "div";
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 shadow-sm">
+    <Component
+      type={onClick ? "button" : undefined}
+      className={`rounded-lg border border-slate-200 bg-slate-50 p-4 text-left shadow-sm ${
+        onClick ? "transition hover:border-cyan-300 hover:bg-cyan-50 focus:outline-none focus:ring-4 focus:ring-cyan-100" : ""
+      }`}
+      onClick={onClick}
+    >
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-slate-500">{label}</span>
         <Icon className="h-5 w-5 text-cyan-700" aria-hidden="true" />
       </div>
       <div className="mt-3 truncate text-2xl font-semibold text-ink">{value}</div>
       {hint && <div className="mt-1 truncate text-xs text-slate-500">{hint}</div>}
-    </div>
+    </Component>
   );
 }
 
-function IdleBarChart({ daily }) {
-  const chartData = daily.slice(-14);
-  const maxSeconds = Math.max(...chartData.map((item) => Number(item.total_idle_seconds || 0)), 1);
+function IdleBarChart({ daily, hourly, showHourly, yAxisMaxSeconds }) {
+  const chartData = showHourly
+    ? Array.from({ length: 24 }, (_, hour) => {
+        const item = hourly.find((entry) => Number(entry.idle_hour) === hour);
+        return {
+          label: String(hour).padStart(2, "0"),
+          tooltipLabel: `${String(hour).padStart(2, "0")}:00`,
+          total_idle_seconds: Number(item?.total_idle_seconds || 0),
+        };
+      })
+    : daily.slice(-14).map((item) => ({
+        label: formatShortDate(item.idle_date),
+        tooltipLabel: formatShortDate(item.idle_date),
+        total_idle_seconds: Number(item.total_idle_seconds || 0),
+      }));
+  const hasData = chartData.some((item) => Number(item.total_idle_seconds || 0) > 0);
+  const maxSeconds = Math.max(Number(yAxisMaxSeconds || 0), ...chartData.map((item) => Number(item.total_idle_seconds || 0)), 1);
+  const tickValues = [maxSeconds, maxSeconds * 0.75, maxSeconds * 0.5, maxSeconds * 0.25, 0];
 
-  if (!chartData.length) {
+  if (!chartData.length || !hasData) {
     return (
       <div className="flex h-64 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">
         No idle gaps found for this range.
@@ -192,24 +226,49 @@ function IdleBarChart({ daily }) {
   }
 
   return (
-    <div className="h-64 rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <div className="flex h-full items-end gap-2">
-        {chartData.map((item) => {
-          const seconds = Number(item.total_idle_seconds || 0);
-          const height = Math.max((seconds / maxSeconds) * 100, 4);
-          return (
-            <div key={item.idle_date} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-              <div className="flex h-48 w-full items-end">
-                <div
-                  className="w-full rounded-t-md bg-cyan-700 transition-all hover:bg-cyan-600"
-                  style={{ height: `${height}%` }}
-                  title={`${formatShortDate(item.idle_date)}: ${formatHoursMinutes(seconds)}`}
-                />
-              </div>
-              <div className="w-full truncate text-center text-xs text-slate-500">{formatShortDate(item.idle_date)}</div>
-            </div>
-          );
-        })}
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+        <span>Idle time</span>
+        <span>{showHourly ? "Hour of day" : "Date"}</span>
+      </div>
+      <div className="grid h-72 grid-cols-[52px_1fr] gap-3">
+        <div className="flex h-56 flex-col justify-between border-r border-slate-200 pr-2 text-right text-xs text-slate-500">
+          {tickValues.map((tick) => (
+            <span key={tick}>{formatAxisDuration(tick)}</span>
+          ))}
+        </div>
+        <div className="relative h-64">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-56">
+            {[0, 25, 50, 75, 100].map((top) => (
+              <div
+                key={top}
+                className="absolute w-full border-t border-slate-200"
+                style={{ top: `${top}%` }}
+              />
+            ))}
+          </div>
+          <div className="relative flex h-64 items-start gap-2">
+            {chartData.map((item, index) => {
+              const seconds = Number(item.total_idle_seconds || 0);
+              const height = seconds > 0 ? Math.max((seconds / maxSeconds) * 100, 4) : 0;
+              const showLabel = !showHourly || index % 3 === 0;
+              return (
+                <div key={item.label} className="flex h-full min-w-0 flex-1 flex-col items-center gap-2">
+                  <div className="flex h-56 w-full items-end border-b border-slate-300">
+                    <div
+                      className="w-full rounded-t-md bg-cyan-700 transition-all hover:bg-cyan-600"
+                      style={{ height: `${height}%` }}
+                      title={`${item.tooltipLabel}: ${formatHoursMinutes(seconds)}`}
+                    />
+                  </div>
+                  <div className="h-6 w-full text-center text-[11px] leading-4 text-slate-500">
+                    {showLabel ? item.label : ""}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -234,7 +293,7 @@ function BucketBreakdown({ buckets, totalIdleSeconds }) {
             <div className="mb-1 flex items-center justify-between gap-3 text-sm">
               <span className="font-medium text-slate-700">{row.label}</span>
               <span className="text-slate-500">
-                {row.gapCount} gaps · {formatHoursMinutes(row.seconds)}
+                {row.gapCount} gaps - {formatHoursMinutes(row.seconds)}
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-200">
@@ -249,7 +308,7 @@ function BucketBreakdown({ buckets, totalIdleSeconds }) {
   );
 }
 
-function DashboardPlaceholder({ total, metrics, filters, settings }) {
+function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongestGaps }) {
   const rangeLabel =
     filters.startDate || filters.endDate
       ? `${filters.startDate || "Start"} to ${filters.endDate || "Today"}`
@@ -262,16 +321,22 @@ function DashboardPlaceholder({ total, metrics, filters, settings }) {
     gapCount: 0,
     buckets: [],
     daily: [],
+    hourly: [],
     byMachine: [],
     longestGaps: [],
   };
   const totalTime = Number(metrics.totalCuttingTimeSeconds || 0) + Number(idle.totalIdleSeconds || 0);
   const idlePercent = totalTime ? (Number(idle.totalIdleSeconds || 0) / totalTime) * 100 : 0;
+  const showHourlyChart = Boolean(filters.startDate && filters.endDate && filters.startDate === filters.endDate);
+  const activeMachines = Math.max(Number(metrics.activeMachines || 0), 1);
   const shiftCapacitySeconds =
     Number(settings.shiftLengthHours || 0) *
     3600 *
     Number(metrics.activeDays || 0) *
-    Math.max(Number(metrics.activeMachines || 0), 1);
+    activeMachines;
+  const chartAxisMaxSeconds = showHourlyChart
+    ? 3600 * activeMachines
+    : Number(settings.shiftLengthHours || 0) * 3600 * activeMachines;
   const cuttingCapacityPercent = shiftCapacitySeconds
     ? (Number(metrics.totalCuttingTimeSeconds || 0) / shiftCapacitySeconds) * 100
     : 0;
@@ -299,14 +364,21 @@ function DashboardPlaceholder({ total, metrics, filters, settings }) {
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-ink">Idle Time By Day</h2>
-                <p className="text-sm text-slate-500">Gaps between one job ending and the next job starting on the same machine.</p>
+                <h2 className="text-base font-semibold text-ink">
+                  {showHourlyChart ? "Idle Time By Hour" : "Idle Time By Day"}
+                </h2>
+                <p className="text-sm text-slate-500">Idle gaps clipped to the configured shift window.</p>
               </div>
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                Last {Math.min(idle.daily.length, 14)} days shown
+                {showHourlyChart ? "24 hours shown" : `Last ${Math.min(idle.daily.length, 14)} days shown`}
               </span>
             </div>
-            <IdleBarChart daily={idle.daily} />
+            <IdleBarChart
+              daily={idle.daily}
+              hourly={idle.hourly || []}
+              showHourly={showHourlyChart}
+              yAxisMaxSeconds={chartAxisMaxSeconds}
+            />
           </div>
 
           <div className="space-y-4">
@@ -320,48 +392,13 @@ function DashboardPlaceholder({ total, metrics, filters, settings }) {
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
               <MetricTile label="Average Idle Gap" value={formatHoursMinutes(idle.averageIdleSeconds)} icon={CalendarDays} />
-              <MetricTile label="Longest Idle Gap" value={formatHoursMinutes(idle.longestIdleSeconds)} icon={Clock3} />
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold text-ink">Top Idle Machines</h2>
-            <div className="space-y-3">
-              {idle.byMachine.length ? (
-                idle.byMachine.map((machine) => (
-                  <div key={machine.machine_name} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="truncate font-medium text-slate-700">{machine.machine_name}</span>
-                    <span className="whitespace-nowrap text-slate-500">
-                      {formatHoursMinutes(machine.total_idle_seconds)} · {machine.gap_count} gaps
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-slate-500">No idle machine data for this range.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold text-ink">Longest Idle Gaps</h2>
-            <div className="space-y-3">
-              {idle.longestGaps.length ? (
-                idle.longestGaps.map((gap) => (
-                  <div key={`${gap.machine_name}-${gap.start_time}`} className="grid gap-1 text-sm sm:grid-cols-[1fr_auto]">
-                    <div className="min-w-0">
-                      <div className="truncate font-medium text-slate-700">{gap.machine_name}</div>
-                      <div className="truncate text-slate-500">
-                        {formatDateTime(gap.previous_end_time)} to {formatDateTime(gap.start_time)}
-                      </div>
-                    </div>
-                    <span className="font-semibold text-ink">{formatHoursMinutes(gap.idle_seconds)}</span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-slate-500">No long idle gaps for this range.</p>
-              )}
+              <MetricTile
+                label="Longest Idle Gap"
+                value={formatHoursMinutes(idle.longestIdleSeconds)}
+                icon={Clock3}
+                hint="Click for details"
+                onClick={onOpenLongestGaps}
+              />
             </div>
           </div>
         </div>
@@ -536,6 +573,68 @@ function DetailModal({ record, onClose }) {
   );
 }
 
+function LongestIdleGapsModal({ open, gaps, onClose }) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="idle-gaps-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h2 id="idle-gaps-title" className="text-xl font-semibold text-ink">
+              Longest Idle Gaps
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">Largest shift-window idle gaps in the current filtered range.</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-4 focus:ring-slate-200"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto p-5">
+          {gaps.length ? (
+            <div className="space-y-3">
+              {gaps.map((gap) => (
+                <div
+                  key={`${gap.machine_name}-${gap.start_time}`}
+                  className="rounded-lg border border-slate-200 bg-slate-50 p-4"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-ink">{gap.job || "Untitled job"}</div>
+                      <div className="mt-1 text-sm text-slate-500">{gap.machine_name}</div>
+                      <div className="mt-2 text-sm text-slate-600">
+                        {formatDateTime(gap.previous_end_time)} to {formatDateTime(gap.start_time)}
+                      </div>
+                    </div>
+                    <div className="whitespace-nowrap text-lg font-semibold text-cyan-800">
+                      {formatHoursMinutes(gap.idle_seconds)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">No long idle gaps for this range.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppMenu({ open, onToggle, onOpenSettings }) {
   return (
     <div className="relative">
@@ -603,6 +702,16 @@ function SettingsModal({ open, settings, onChange, onClose }) {
           </button>
         </div>
         <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="shiftStartTime">Shift start time</Label>
+            <input
+              id="shiftStartTime"
+              className={fieldClass}
+              type="time"
+              value={settings.shiftStartTime}
+              onChange={(event) => updateSetting("shiftStartTime", event.target.value)}
+            />
+          </div>
           <div>
             <Label htmlFor="shiftLengthHours">Shift length, hours</Label>
             <input
@@ -677,11 +786,14 @@ export default function App() {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [longestIdleGapsOpen, setLongestIdleGapsOpen] = useState(false);
 
   const requestFilters = useMemo(
     () => ({
       ...filters,
       search: debouncedSearch,
+      shiftStartTime: settings.shiftStartTime,
+      shiftLengthHours: settings.shiftLengthHours,
       setupAllowanceMinutes: settings.setupAllowanceMinutes,
       shortIdleThresholdMinutes: settings.shortIdleThresholdMinutes,
       longIdleThresholdMinutes: settings.longIdleThresholdMinutes,
@@ -690,6 +802,8 @@ export default function App() {
     [
       filters,
       debouncedSearch,
+      settings.shiftStartTime,
+      settings.shiftLengthHours,
       settings.setupAllowanceMinutes,
       settings.shortIdleThresholdMinutes,
       settings.longIdleThresholdMinutes,
@@ -757,15 +871,23 @@ export default function App() {
         </div>
       </header>
 
-      <DashboardPlaceholder total={total} metrics={metrics} filters={filters} settings={settings} />
-
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+      <section className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase text-slate-500">
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           Filters
         </div>
         <FilterBar filters={filters} setFilters={setFilters} />
+      </section>
 
+      <DashboardPlaceholder
+        total={total}
+        metrics={metrics}
+        filters={filters}
+        settings={settings}
+        onOpenLongestGaps={() => setLongestIdleGapsOpen(true)}
+      />
+
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="mt-5 flex min-h-9 items-center justify-between gap-3">
           <p className="text-sm text-slate-600">
             Showing <span className="font-semibold text-ink">{jobs.length.toLocaleString("en-GB")}</span> of{" "}
@@ -799,6 +921,11 @@ export default function App() {
       </main>
 
       <DetailModal record={selectedRecord} onClose={() => setSelectedRecord(null)} />
+      <LongestIdleGapsModal
+        open={longestIdleGapsOpen}
+        gaps={metrics.idle?.longestGaps || []}
+        onClose={() => setLongestIdleGapsOpen(false)}
+      />
       <SettingsModal
         open={settingsOpen}
         settings={settings}
