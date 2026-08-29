@@ -674,7 +674,9 @@ function LongestIdleGapsModal({ open, gaps, onClose }) {
             <h2 id="idle-gaps-title" className="text-xl font-semibold text-ink">
               Longest Idle Gaps
             </h2>
-            <p className="mt-1 text-sm text-slate-500">Largest shift-window idle gaps in the current filtered range.</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Largest shift-window idle gaps, showing the job before and the job started after the gap.
+            </p>
           </div>
           <button
             type="button"
@@ -695,8 +697,13 @@ function LongestIdleGapsModal({ open, gaps, onClose }) {
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Previous job</div>
+                      <div className="truncate font-medium text-slate-700">{gap.previous_job || "Unknown"}</div>
+                      <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Next job after idle
+                      </div>
                       <div className="truncate font-semibold text-ink">{gap.job || "Untitled job"}</div>
-                      <div className="mt-1 text-sm text-slate-500">{gap.machine_name}</div>
+                      <div className="mt-2 text-sm text-slate-500">{gap.machine_name}</div>
                       <div className="mt-2 text-sm text-slate-600">
                         {formatDateTime(gap.previous_end_time)} to {formatDateTime(gap.start_time)}
                       </div>

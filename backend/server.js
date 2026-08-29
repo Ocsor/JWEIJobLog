@@ -195,6 +195,7 @@ function calculateIdleMetrics(gaps, settings) {
     measuredGaps.push({
       machine_name: machineName,
       job: gap.job,
+      previous_job: gap.previous_job,
       start_time: gap.start_time,
       previous_end_time: gap.previous_end_time,
       idle_seconds: Math.round(shiftIdleSeconds),
@@ -333,15 +334,19 @@ app.get("/api/jobs", async (req, res) => {
            id,
            job,
            machine_name,
-           start_time,
-           end_time,
-           LAG(end_time) OVER (
-             PARTITION BY machine_name
-             ORDER BY start_time, id
-           ) AS previous_end_time
+          start_time,
+          end_time,
+          LAG(job) OVER (
+            PARTITION BY machine_name
+            ORDER BY start_time, id
+          ) AS previous_job,
+          LAG(end_time) OVER (
+            PARTITION BY machine_name
+            ORDER BY start_time, id
+          ) AS previous_end_time
          FROM filtered_jobs
        )
-       SELECT machine_name, job, start_time, previous_end_time
+       SELECT machine_name, job, previous_job, start_time, previous_end_time
        FROM sequenced_jobs
        WHERE previous_end_time IS NOT NULL
          AND start_time > previous_end_time
