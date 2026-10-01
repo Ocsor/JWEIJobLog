@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
-export async function fetchJobs(filters) {
+function buildParams(filters) {
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
@@ -8,6 +8,12 @@ export async function fetchJobs(filters) {
       params.set(key, value);
     }
   });
+
+  return params;
+}
+
+export async function fetchJobs(filters) {
+  const params = buildParams(filters);
 
   const response = await fetch(`${API_BASE}/api/jobs?${params.toString()}`);
 
@@ -17,4 +23,9 @@ export async function fetchJobs(filters) {
   }
 
   return response.json();
+}
+
+export function getJobsCsvUrl(filters) {
+  const params = buildParams(filters);
+  return `${API_BASE}/api/jobs.csv?${params.toString()}`;
 }

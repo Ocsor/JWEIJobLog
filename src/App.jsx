@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Clock3,
   Database,
+  Download,
   Gauge,
   Layers3,
   Menu,
@@ -11,7 +12,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { fetchJobs } from "./api";
+import { fetchJobs, getJobsCsvUrl } from "./api";
 
 const visibleColumns = [
   { key: "job", label: "Job" },
@@ -567,12 +568,14 @@ function DashboardPlaceholder({ total, metrics, filters, settings, onOpenLongest
   );
 }
 
-function FilterBar({ filters, setFilters }) {
+function FilterBar({ filters, setFilters, csvUrl, exportDisabled }) {
   const inputClass =
     "block w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 text-sm text-slate-900 shadow-sm focus:border-cyan-600 focus:ring-cyan-600";
+  const actionClass =
+    "inline-flex w-full items-center justify-center rounded-lg border px-4 py-2.5 text-sm font-medium shadow-sm focus:outline-none focus:ring-4";
 
   return (
-    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_170px_170px_130px_auto]">
+    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:grid-cols-[1fr_170px_170px_130px_auto_auto]">
       <div>
         <Label htmlFor="search">Search jobs</Label>
         <div className="relative">
@@ -623,12 +626,26 @@ function FilterBar({ filters, setFilters }) {
       <div className="flex items-end">
         <button
           type="button"
-          className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-4 focus:ring-slate-200"
+          className={`${actionClass} border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus:ring-slate-200`}
           onClick={() => setFilters({ search: "", startDate: "", endDate: "", limit: "100" })}
         >
           <X className="mr-2 h-4 w-4" />
           Clear
         </button>
+      </div>
+      <div className="flex items-end">
+        <a
+          className={`${actionClass} ${
+            exportDisabled
+              ? "pointer-events-none border-slate-200 bg-slate-100 text-slate-400"
+              : "border-cyan-700 bg-cyan-700 text-white hover:bg-cyan-800 focus:ring-cyan-100"
+          }`}
+          href={exportDisabled ? undefined : csvUrl}
+          aria-disabled={exportDisabled}
+        >
+          <Download className="mr-2 h-4 w-4" aria-hidden="true" />
+          CSV
+        </a>
       </div>
     </div>
   );
@@ -977,6 +994,7 @@ export default function App() {
       settings.longIdleThresholdMinutes,
     ],
   );
+  const csvUrl = useMemo(() => getJobsCsvUrl(requestFilters), [requestFilters]);
 
   useEffect(() => {
     saveSettings(settings);
@@ -1046,7 +1064,12 @@ export default function App() {
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
           Filters
         </div>
-        <FilterBar filters={filters} setFilters={setFilters} />
+        <FilterBar
+          filters={filters}
+          setFilters={setFilters}
+          csvUrl={csvUrl}
+          exportDisabled={loading || total === 0}
+        />
       </section>
 
       <DashboardPlaceholder

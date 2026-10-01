@@ -46,6 +46,34 @@ const allColumns = [
   "updated_at",
 ];
 
+const csvColumns = allColumns.map((key) => ({
+  key,
+  label: key,
+}));
+
+function formatCsvValue(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function escapeCsvValue(value) {
+  const formatted = formatCsvValue(value);
+  if (/[",\r\n]/.test(formatted)) {
+    return `"${formatted.replaceAll('"', '""')}"`;
+  }
+  return formatted;
+}
+
+function rowsToCsv(rows) {
+  const header = csvColumns.map((column) => escapeCsvValue(column.label)).join(",");
+  const body = rows.map((row) =>
+    csvColumns.map((column) => escapeCsvValue(row[column.key])).join(","),
+  );
+  return [header, ...body].join("\r\n");
+}
+
 function buildFilters(query) {
   const where = [];
   const params = {};
@@ -270,6 +298,26 @@ app.get("/api/health", async (_req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ ok: false, message: error.message });
+  }
+});
+
+app.get("/api/jobs.csv", async (req, res) => {
+  try {
+    const { clause, params } = buildFilters(req.query);
+    const [rows] = await pool.execute(
+      `SELECT ${allColumns.join(", ")}
+       FROM optiscout_jobs
+       ${clause}
+       ORDER BY COALESCE(start_time, imported_at) DESC, id DESC`,
+      params,
+    );
+
+    const today = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="jwei-job-log-${today}.csv"`);
+    res.send(rowsToCsv(rows));
+  } catch (error) {
+    res.status(500).json({ message: "Unable to export job records.", detail: error.message });
   }
 });
 
